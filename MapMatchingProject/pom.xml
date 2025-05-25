@@ -8,7 +8,7 @@
         <version>3.5.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.example</groupId>
+    <groupId>com.neoxenus</groupId>
     <artifactId>MapMatchingProject</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>MapMatchingProject</name>
@@ -46,6 +46,15 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- https://mvnrepository.com/artifact/jakarta.json/jakarta.json-api -->
+        <!-- https://mvnrepository.com/artifact/org.json/json -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20250517</version>
+        </dependency>
+
     </dependencies>
 
     <build>
