@@ -1,55 +1,57 @@
 package com.example.mapmatchingproject;
 
+import com.example.mapmatchingproject.entities.Point;
+import com.example.mapmatchingproject.entities.PointsCollection;
+import com.example.mapmatchingproject.entities.RoadSegment;
+import com.example.mapmatchingproject.matchers.EuclideanMatcher;
+import com.example.mapmatchingproject.matchers.OSRMMapMatcher;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ApplicationContext;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Scanner;
 
 @SpringBootApplication
 public class MapMatchingProjectApplication {
 
 
     public static void main(String[] args) throws Exception {
-        // 1. Load GPS points
+
+        ApplicationContext context = SpringApplication.run(MapMatchingProjectApplication.class, args);
+
         PointsCollection pointsCollection = new PointsCollection();
         List<Point> gpsPoints = pointsCollection.getPointList();
 
-        // Встанови межі координат (bounding box) під свої GPS-дані
         double south = pointsCollection.getSouth().getLat();
         double west = pointsCollection.getWest().getLon();
         double north = pointsCollection.getNorth().getLat();
         double east = pointsCollection.getEast().getLon();
 
-//        List<Point> roadPoints = getRoadPointsFromOverpass(south, west, north, east);
-//        System.out.println("Завантажено " + roadPoints.size() + " точок дороги з Overpass API.");
+        List<Point> roadPoints = getRoadPointsFromOverpass(south, west, north, east);
+        System.out.println("Завантажено " + roadPoints.size() + " точок дороги з Overpass API.");
 
-
-
-//        EuclideanMatcher matcher = new EuclideanMatcher(roadPoints);
         System.out.println("Euclidean.html Matching Results:");
         List<Point> euclideanMatched = new ArrayList<>();
 
         List<RoadSegment> segments = RoadSegment.buildSegmentsFromGeometry(getJSONFromOverpass(south, west, north, east));
 
+        EuclideanMatcher matcher = new EuclideanMatcher(roadPoints, segments);
+
         for (Point gps : gpsPoints) {
 //            Point matched = matcher.match(gps);
-            Point matched = EuclideanMatcher.matchToRoad(gps, segments);
+            Point matched = matcher.matchToRoad(gps);
             euclideanMatched.add(matched);
             System.out.println("GPS: " + gps + " => Matched: " + matched);
         }
 
-        // 4. OSRM.html API
         System.out.println("\nOSRM.html Matching Results:");
         var result = OSRMMapMatcher.match(pointsCollection.getPointList());
         List<Point> OSRMResult = extractMatchedPoints(result.toString());
@@ -59,7 +61,6 @@ public class MapMatchingProjectApplication {
         MapGenerator.generateHtmlMap(pointsCollection.getPointList(), euclideanMatched, "Euclidean.html");
         MapGenerator.generateHtmlMap(pointsCollection.getPointList(), OSRMResult, "OSRM.html");
 
-//        System.out.println(result.toString(2));
     }
 
     public static List<Point> extractMatchedPoints(String jsonString) {
@@ -68,7 +69,7 @@ public class MapMatchingProjectApplication {
         JSONArray matches = new JSONArray(jsonString);
         if (matches.length() == 0) return points;
 
-        JSONObject match = matches.getJSONObject(0); // беремо перший matching result
+        JSONObject match = matches.getJSONObject(0);
         JSONObject geometry = match.getJSONObject("geometry");
         JSONArray coordinates = geometry.getJSONArray("coordinates");
 
@@ -98,8 +99,7 @@ public class MapMatchingProjectApplication {
         URL url = new URL("https://overpass-api.de/api/interpreter?data=" + encodedQuery);
 
         JSONObject response = OSRMMapMatcher.connect(url);
-        JSONArray elements = response.getJSONArray("elements");
-        return elements;
+        return response.getJSONArray("elements");
     }
     private static List<Point> getRoadPointsFromOverpass(double south, double west, double north, double east) throws IOException {
         List<Point> roadPoints = new ArrayList<>();

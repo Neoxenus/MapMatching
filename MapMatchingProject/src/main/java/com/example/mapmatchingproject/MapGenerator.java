@@ -1,5 +1,7 @@
 package com.example.mapmatchingproject;
 
+import com.example.mapmatchingproject.entities.Point;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,7 +53,7 @@ public class MapGenerator {
         """, center.getLat(), center.getLon(), markersJs.toString());
 
         Files.writeString(Path.of("src/main/out/" + filename), html);
-        System.out.println("✅ HTML map saved: " + filename);
+        System.out.println("HTML map saved: " + filename);
     }
 
 }

@@ -1,4 +1,4 @@
-package com.example.mapmatchingproject;
+package com.example.mapmatchingproject.entities;
 
 import lombok.Getter;
 
@@ -15,7 +15,7 @@ public class PointsCollection {
     public PointsCollection() {
 
         try {
-            pointList = loadPointsFromCSV("src/main/resources/gps_points.csv");
+            pointList = loadPointsFromCSV();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -33,9 +33,9 @@ public class PointsCollection {
         return extended;
     }
 
-    private static List<Point> loadPointsFromCSV(String filePath) throws IOException {
+    private static List<Point> loadPointsFromCSV() throws IOException {
         List<Point> points = new ArrayList<>();
-        BufferedReader reader = new BufferedReader(new FileReader(filePath));
+        BufferedReader reader = new BufferedReader(new FileReader("src/main/resources/gps_points.csv"));
         String line;
         while ((line = reader.readLine()) != null) {
             String[] parts = line.split(",");

@@ -1,4 +1,4 @@
-package com.example.mapmatchingproject;
+package com.example.mapmatchingproject.entities;
 
 import lombok.Getter;
 import lombok.Setter;
