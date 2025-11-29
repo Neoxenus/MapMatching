@@ -11,6 +11,7 @@ import java.util.List;
 @Getter
 public class PointsCollection {
     private List<Point> pointList;
+    private static final double DELTA = 0.01;
 
     public PointsCollection() {
 
@@ -50,25 +51,25 @@ public class PointsCollection {
     public Point getNorth(){
         Point point = pointList.stream().max((a, b) -> (int) (a.getLat() - b.getLat())).orElse(null);
         Point newPoint = new Point(point);
-        newPoint.setLat(newPoint.getLat() + 0.5);
+        newPoint.setLat(newPoint.getLat() + DELTA);
         return newPoint;
     }
     public Point getSouth(){
         Point point = pointList.stream().min((a, b) -> (int) (a.getLat() - b.getLat())).orElse(null);
         Point newPoint = new Point(point);
-        newPoint.setLat(newPoint.getLat() - 0.5);
+        newPoint.setLat(newPoint.getLat() - DELTA);
         return newPoint;
     }
     public Point getWest(){
         Point point = pointList.stream().min((a, b) -> (int) (a.getLon() - b.getLon())).orElse(null);
         Point newPoint = new Point(point);
-        newPoint.setLon(newPoint.getLon() - 0.5);
+        newPoint.setLon(newPoint.getLon() - DELTA);
         return newPoint;
     }
     public Point getEast(){
         Point point = pointList.stream().max((a, b) -> (int) (a.getLon() - b.getLon())).orElse(null);
         Point newPoint = new Point(point);
-        newPoint.setLon(newPoint.getLon() + 0.5);
+        newPoint.setLon(newPoint.getLon() + DELTA);
         return newPoint;
     }
 }
