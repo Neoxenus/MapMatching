@@ -1,14 +1,15 @@
 package com.example.mapmatchingproject.matchers;
 
-import com.example.mapmatchingproject.Util;
 import com.example.mapmatchingproject.entities.Point;
 import com.example.mapmatchingproject.entities.RoadSegment;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
-import java.net.URL;
 import java.util.*;
 
+/**
+ * Fully local HMM Matcher.
+ * - Removed OSRM API calls.
+ * - Implemented internal Graph and Dijkstra pathfinding.
+ */
 public class HMMMapMatcher {
 
     // --- CONSTANTS ---
@@ -22,8 +23,8 @@ public class HMMMapMatcher {
 
     public HMMMapMatcher(List<RoadSegment> allSegments) {
         this.spatialIndex = new DefaultSpatialIndex(allSegments);
-        // We use the Table Service now
-        this.router = new OSRMTableRoutingService();
+        // NEW: Use the Graph-based local router
+        this.router = new GraphRoutingService(allSegments);
         System.out.println("[HMM] Initialized with " + allSegments.size() + " road segments.");
     }
 
@@ -57,10 +58,10 @@ public class HMMMapMatcher {
             TimeStep currentStep = timeSteps.get(t);
             TimeStep prevStep = timeSteps.get(t - 1);
 
-            System.out.printf("[HMM] Step %d/%d: Batch fetching matrix %d x %d... ",
+            System.out.printf("[HMM] Step %d/%d: Computing local graph routes (%d x %d)... ",
                     t, timeSteps.size() - 1, prevStep.candidates.size(), currentStep.candidates.size());
 
-            // --- OPTIMIZATION: Fetch ALL distances in ONE call ---
+            // Fetch matrix locally
             double[][] distanceMatrix = router.getDistanceMatrix(prevStep.candidates, currentStep.candidates);
             System.out.println("Done.");
 
@@ -70,24 +71,18 @@ public class HMMMapMatcher {
             double linearDist = distanceMeters(prevStep.observation, currentStep.observation);
             boolean anyPathFound = false;
 
-            // Loop through Current Candidates (Columns in matrix)
             for (int currIdx = 0; currIdx < currentStep.candidates.size(); currIdx++) {
                 Candidate currCand = currentStep.candidates.get(currIdx);
                 double maxProb = Double.NEGATIVE_INFINITY;
                 Candidate bestPrev = null;
-
                 double emissionLog = Math.log(emissionProbability(currentStep.observation, currCand));
 
-                // Loop through Previous Candidates (Rows in matrix)
                 for (int prevIdx = 0; prevIdx < prevStep.candidates.size(); prevIdx++) {
                     Candidate prevCand = prevStep.candidates.get(prevIdx);
-
                     if (!previousProbabilities.containsKey(prevCand)) continue;
 
-                    // LOOKUP from Matrix instead of API call
                     double routeDist = distanceMatrix[prevIdx][currIdx];
-
-                    if (routeDist < 0) continue; // Invalid route
+                    if (routeDist < 0) continue;
 
                     double transitionLog = Math.log(transitionProbability(linearDist, routeDist));
                     double totalProb = previousProbabilities.get(prevCand) + transitionLog + emissionLog;
@@ -219,8 +214,42 @@ public class HMMMapMatcher {
         }
     }
 
-    private class OSRMTableRoutingService implements RoutingService {
-        private static final String OSRM_TABLE_URL = "http://router.project-osrm.org/table/v1/driving/";
+    /**
+     * LOCAL GRAPH ROUTING SERVICE
+     * Implements Dijkstra's algorithm in-memory.
+     */
+    private class GraphRoutingService implements RoutingService {
+        // Map from a unique Point ID (string) to a list of connected edges
+        private final Map<String, List<Edge>> adjacencyList = new HashMap<>();
+        // Helper to store actual Point objects for IDs
+        private final Map<String, Point> nodeRegistry = new HashMap<>();
+
+        public GraphRoutingService(List<RoadSegment> segments) {
+            buildGraph(segments);
+        }
+
+        private void buildGraph(List<RoadSegment> segments) {
+            for (RoadSegment seg : segments) {
+                Point a = seg.a();
+                Point b = seg.b();
+                double weight = distanceMeters(a, b);
+
+                String idA = getId(a);
+                String idB = getId(b);
+
+                nodeRegistry.putIfAbsent(idA, a);
+                nodeRegistry.putIfAbsent(idB, b);
+
+                adjacencyList.computeIfAbsent(idA, k -> new ArrayList<>()).add(new Edge(idB, weight));
+                // Assuming undirected graph for roads (simplification)
+                adjacencyList.computeIfAbsent(idB, k -> new ArrayList<>()).add(new Edge(idA, weight));
+            }
+        }
+
+        private String getId(Point p) {
+            // Round to ~1m precision to merge connected nodes
+            return String.format(Locale.US, "%.5f,%.5f", p.lat, p.lon);
+        }
 
         @Override
         public double[][] getDistanceMatrix(List<Candidate> sources, List<Candidate> destinations) {
@@ -228,69 +257,87 @@ public class HMMMapMatcher {
             int cols = destinations.size();
             double[][] matrix = new double[rows][cols];
 
-            // Initialize with -1 (error state)
-            for(double[] row : matrix) Arrays.fill(row, -1.0);
+            // For each source, calculate distance to all destinations
+            for (int i = 0; i < rows; i++) {
+                Candidate src = sources.get(i);
 
-            if (rows == 0 || cols == 0) return matrix;
+                // Optimization: Instead of full Dijkstra for every cell,
+                // we run Dijkstra from the Source's segment endpoints once per source.
+                Map<String, Double> distsFromA = runDijkstra(getId(src.segment.a()));
+                Map<String, Double> distsFromB = runDijkstra(getId(src.segment.b()));
 
-            try {
-                // 1. Build Coordinates List (All unique sources + All unique destinations)
-                StringBuilder coords = new StringBuilder();
+                double distSrcToA = distanceMeters(src.snappedPoint, src.segment.a());
+                double distSrcToB = distanceMeters(src.snappedPoint, src.segment.b());
 
-                // Add Sources
-                for (Candidate c : sources) {
-                    coords.append(String.format(Locale.US, "%.6f,%.6f;", c.snappedPoint.lon, c.snappedPoint.lat));
-                }
-                // Add Destinations
-                for (Candidate c : destinations) {
-                    coords.append(String.format(Locale.US, "%.6f,%.6f;", c.snappedPoint.lon, c.snappedPoint.lat));
-                }
-                // Remove last semicolon
-                coords.setLength(coords.length() - 1);
+                for (int j = 0; j < cols; j++) {
+                    Candidate dst = destinations.get(j);
 
-                // 2. Build Indices
-                StringBuilder srcIndices = new StringBuilder();
-                for (int i = 0; i < rows; i++) srcIndices.append(i).append(";");
-                srcIndices.setLength(srcIndices.length() - 1);
-
-                StringBuilder dstIndices = new StringBuilder();
-                for (int i = 0; i < cols; i++) dstIndices.append(rows + i).append(";");
-                dstIndices.setLength(dstIndices.length() - 1);
-
-                // 3. Construct URL
-                String urlStr = OSRM_TABLE_URL + coords +
-                        "?sources=" + srcIndices +
-                        "&destinations=" + dstIndices +
-                        "&annotations=distance";
-
-                // 4. Call API
-                long start = System.currentTimeMillis();
-                JSONObject response = Util.connect(new URL(urlStr));
-
-                if (System.currentTimeMillis() - start > 1000) {
-                    System.out.println("   [OSRM-TABLE] Slow batch call: " + (System.currentTimeMillis() - start) + "ms");
-                }
-
-                // 5. Parse Result
-                if (response.getString("code").equals("Ok")) {
-                    JSONArray distances = response.getJSONArray("distances");
-
-                    // OSRM returns distances[source_index][dest_index]
-                    for (int i = 0; i < rows; i++) {
-                        JSONArray rowArr = distances.getJSONArray(i);
-                        for (int j = 0; j < cols; j++) {
-                            // Check for null (unreachable)
-                            if (!rowArr.isNull(j)) {
-                                matrix[i][j] = rowArr.getDouble(j);
-                            }
-                        }
+                    if (src.segment.equals(dst.segment)) {
+                        // Same segment: simple distance
+                        matrix[i][j] = distanceMeters(src.snappedPoint, dst.snappedPoint);
+                        continue;
                     }
-                }
 
-            } catch (Exception e) {
-                System.out.println("   [OSRM-TABLE-ERR] " + e.getMessage());
+                    String idDstA = getId(dst.segment.a());
+                    String idDstB = getId(dst.segment.b());
+                    double distDstToA = distanceMeters(dst.snappedPoint, dst.segment.a());
+                    double distDstToB = distanceMeters(dst.snappedPoint, dst.segment.b());
+
+                    // Find shortest path combination:
+                    // (Src -> A -> ... -> DstA -> Dst)
+                    // (Src -> A -> ... -> DstB -> Dst)
+                    // (Src -> B -> ... -> DstA -> Dst)
+                    // (Src -> B -> ... -> DstB -> Dst)
+
+                    double d1 = getPathDist(distSrcToA, distsFromA, idDstA, distDstToA);
+                    double d2 = getPathDist(distSrcToA, distsFromA, idDstB, distDstToB);
+                    double d3 = getPathDist(distSrcToB, distsFromB, idDstA, distDstToA);
+                    double d4 = getPathDist(distSrcToB, distsFromB, idDstB, distDstToB);
+
+                    double min = Math.min(Math.min(d1, d2), Math.min(d3, d4));
+                    matrix[i][j] = (min == Double.MAX_VALUE) ? -1.0 : min;
+                }
             }
             return matrix;
         }
+
+        private double getPathDist(double startOffset, Map<String, Double> graphDists, String targetNode, double endOffset) {
+            Double graphDist = graphDists.get(targetNode);
+            if (graphDist == null) return Double.MAX_VALUE;
+            return startOffset + graphDist + endOffset;
+        }
+
+        private Map<String, Double> runDijkstra(String startId) {
+            Map<String, Double> distances = new HashMap<>();
+            PriorityQueue<PathNode> pq = new PriorityQueue<>(Comparator.comparingDouble(n -> n.dist));
+
+            distances.put(startId, 0.0);
+            pq.add(new PathNode(startId, 0.0));
+
+            // Limit search range to improve performance (e.g., 2km)
+            double MAX_SEARCH_DIST = 2000.0;
+
+            while (!pq.isEmpty()) {
+                PathNode current = pq.poll();
+
+                if (current.dist > distances.getOrDefault(current.id, Double.MAX_VALUE)) continue;
+                if (current.dist > MAX_SEARCH_DIST) continue;
+
+                List<Edge> neighbors = adjacencyList.get(current.id);
+                if (neighbors == null) continue;
+
+                for (Edge edge : neighbors) {
+                    double newDist = current.dist + edge.weight;
+                    if (newDist < distances.getOrDefault(edge.target, Double.MAX_VALUE)) {
+                        distances.put(edge.target, newDist);
+                        pq.add(new PathNode(edge.target, newDist));
+                    }
+                }
+            }
+            return distances;
+        }
+
+        private record Edge(String target, double weight) {}
+        private record PathNode(String id, double dist) {}
     }
 }
