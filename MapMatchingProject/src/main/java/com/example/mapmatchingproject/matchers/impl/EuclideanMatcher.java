@@ -1,35 +1,37 @@
-package com.example.mapmatchingproject.matchers;
+package com.example.mapmatchingproject.matchers.impl;
 
 import com.example.mapmatchingproject.entities.Point;
 import com.example.mapmatchingproject.entities.RoadSegment;
+import com.example.mapmatchingproject.matchers.MapMatcher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
-public class EuclideanMatcher {
-    private final List<Point> roadPoints;
+public class EuclideanMatcher implements MapMatcher {
+
     List<RoadSegment> segments;
 
     @Autowired
-    public EuclideanMatcher(List<Point> roadPoints, List<RoadSegment> segments) {
-        this.roadPoints = roadPoints;
+    public EuclideanMatcher(List<RoadSegment> segments) {
         this.segments = segments;
     }
 
-    public Point match(Point gpsPoint) {
-        Point closest = null;
-        double minDist = Double.MAX_VALUE;
-        for (Point rp : roadPoints) {
-            double dist = gpsPoint.distanceTo(rp);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = rp;
-            }
-        }
-        return closest;
+
+    @Override
+    public List<Point> match(List<Point> rawTrace) {
+        return rawTrace.stream()
+                .map(this::matchToRoad)
+                .collect(Collectors.toList());
     }
+
+    @Override
+    public String getMatcherName() {
+        return "Euclidean";
+    }
+
     public Point matchToRoad(Point gpsPoint) {
         Point bestMatch = null;
         double minDist = Double.MAX_VALUE;
@@ -45,5 +47,6 @@ public class EuclideanMatcher {
 
         return bestMatch;
     }
+
 
 }

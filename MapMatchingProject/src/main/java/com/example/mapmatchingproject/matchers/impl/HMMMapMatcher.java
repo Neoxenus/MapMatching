@@ -1,16 +1,18 @@
-package com.example.mapmatchingproject.matchers;
+package com.example.mapmatchingproject.matchers.impl;
 
 import com.example.mapmatchingproject.entities.Point;
 import com.example.mapmatchingproject.entities.RoadSegment;
+import com.example.mapmatchingproject.matchers.MapMatcher;
+import org.springframework.stereotype.Component;
 
 import java.util.*;
 
 /**
  * Fully local HMM Matcher.
- * - Removed OSRM API calls.
  * - Implemented internal Graph and Dijkstra pathfinding.
  */
-public class HMMMapMatcher {
+@Component
+public class HMMMapMatcher implements MapMatcher {
 
     // --- CONSTANTS ---
     private static final double SIGMA = 4.07;
@@ -23,11 +25,11 @@ public class HMMMapMatcher {
 
     public HMMMapMatcher(List<RoadSegment> allSegments) {
         this.spatialIndex = new DefaultSpatialIndex(allSegments);
-        // NEW: Use the Graph-based local router
         this.router = new GraphRoutingService(allSegments);
         System.out.println("[HMM] Initialized with " + allSegments.size() + " road segments.");
     }
 
+    @Override
     public List<Point> match(List<Point> gpsTrace) {
         if (gpsTrace.isEmpty()) return new ArrayList<>();
 
@@ -47,7 +49,7 @@ public class HMMMapMatcher {
         Map<Candidate, Double> previousProbabilities = new HashMap<>();
         List<Map<Candidate, Candidate>> pathBackPointers = new ArrayList<>();
 
-        TimeStep firstStep = timeSteps.get(0);
+        TimeStep firstStep = timeSteps.getFirst();
         for (Candidate candidate : firstStep.candidates) {
             double emissionProb = emissionProbability(firstStep.observation, candidate);
             previousProbabilities.put(candidate, Math.log(emissionProb));
@@ -126,19 +128,24 @@ public class HMMMapMatcher {
         Candidate currentParams = bestLastState;
         for (int t = timeSteps.size() - 1; t >= 0; t--) {
             if (currentParams != null) {
-                result.add(0, currentParams.snappedPoint);
+                result.addFirst(currentParams.snappedPoint);
                 if (t > 0 && t - 1 < pathBackPointers.size()) {
                     currentParams = pathBackPointers.get(t - 1).get(currentParams);
                 }
             } else {
                 Candidate fallback = getClosestCandidate(timeSteps.get(t));
-                if (fallback != null) result.add(0, fallback.snappedPoint);
-                else result.add(0, timeSteps.get(t).observation);
+                if (fallback != null) result.addFirst(fallback.snappedPoint);
+                else result.addFirst(timeSteps.get(t).observation);
             }
         }
 
         System.out.println("[HMM] Finished. Total time: " + (System.currentTimeMillis() - startTime) + "ms");
         return result;
+    }
+
+    @Override
+    public String getMatcherName() {
+        return "HMM";
     }
 
     // --- Helpers ---
@@ -196,7 +203,7 @@ public class HMMMapMatcher {
         List<Candidate> findCandidates(Point p, double radiusMeters);
     }
 
-    private class DefaultSpatialIndex implements SpatialIndex {
+    private static class DefaultSpatialIndex implements SpatialIndex {
         private final List<RoadSegment> segments;
         public DefaultSpatialIndex(List<RoadSegment> segments) { this.segments = segments; }
 
@@ -240,9 +247,9 @@ public class HMMMapMatcher {
                 nodeRegistry.putIfAbsent(idA, a);
                 nodeRegistry.putIfAbsent(idB, b);
 
-                adjacencyList.computeIfAbsent(idA, k -> new ArrayList<>()).add(new Edge(idB, weight));
+                adjacencyList.computeIfAbsent(idA, _ -> new ArrayList<>()).add(new Edge(idB, weight));
                 // Assuming undirected graph for roads (simplification)
-                adjacencyList.computeIfAbsent(idB, k -> new ArrayList<>()).add(new Edge(idA, weight));
+                adjacencyList.computeIfAbsent(idB, _ -> new ArrayList<>()).add(new Edge(idA, weight));
             }
         }
 
