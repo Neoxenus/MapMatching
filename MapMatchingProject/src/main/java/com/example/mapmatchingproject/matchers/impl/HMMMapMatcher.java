@@ -3,6 +3,8 @@ package com.example.mapmatchingproject.matchers.impl;
 import com.example.mapmatchingproject.entities.Point;
 import com.example.mapmatchingproject.entities.RoadSegment;
 import com.example.mapmatchingproject.matchers.MapMatcher;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -11,22 +13,29 @@ import java.util.*;
  * Fully local HMM Matcher.
  * - Implemented internal Graph and Dijkstra pathfinding.
  */
+@Slf4j
 @Component
 public class HMMMapMatcher implements MapMatcher {
 
     // --- CONSTANTS ---
-    private static final double SIGMA = 4.07;
-    private static final double BETA = 10.0;
-    private static final double SEARCH_RADIUS_M = 50.0;
+    @Value("${mapmatching.hmm.sigma}")
+    private double sigma;
+
+    @Value("${mapmatching.hmm.beta}")
+    private double beta;
+
+    @Value("${mapmatching.hmm.search-radius}")
+    private double searchRadiusM;
     private static final double METERS_PER_DEGREE = 111000.0;
 
-    private final RoutingService router;
-    private final SpatialIndex spatialIndex;
+    private RoutingService router;
+    private SpatialIndex spatialIndex;
 
-    public HMMMapMatcher(List<RoadSegment> allSegments) {
-        this.spatialIndex = new DefaultSpatialIndex(allSegments);
-        this.router = new GraphRoutingService(allSegments);
-        System.out.println("[HMM] Initialized with " + allSegments.size() + " road segments.");
+    @Override
+    public void initContext(List<RoadSegment> segments) {
+        this.spatialIndex = new DefaultSpatialIndex(segments);
+        this.router = new GraphRoutingService(segments);
+        log.info("[HMM] Initialized with {} road segments.", segments.size());
     }
 
     @Override
@@ -40,9 +49,9 @@ public class HMMMapMatcher implements MapMatcher {
         List<TimeStep> timeSteps = new ArrayList<>();
         for (int i = 0; i < gpsTrace.size(); i++) {
             Point p = gpsTrace.get(i);
-            List<Candidate> candidates = spatialIndex.findCandidates(p, SEARCH_RADIUS_M);
+            List<Candidate> candidates = spatialIndex.findCandidates(p, searchRadiusM);
             timeSteps.add(new TimeStep(p, candidates));
-            System.out.printf("[HMM] Point %d: Found %d candidates within %.1fm%n", i, candidates.size(), SEARCH_RADIUS_M);
+            System.out.printf("[HMM] Point %d: Found %d candidates within %.1fm%n", i, candidates.size(), searchRadiusM);
         }
 
         // 2. Initialize First Step
@@ -148,6 +157,7 @@ public class HMMMapMatcher implements MapMatcher {
         return "HMM";
     }
 
+
     // --- Helpers ---
 
     private Candidate getClosestCandidate(TimeStep step) {
@@ -163,12 +173,12 @@ public class HMMMapMatcher implements MapMatcher {
 
     private double emissionProbability(Point obs, Candidate candidate) {
         double dist = distanceMeters(obs, candidate.snappedPoint);
-        return (1.0 / (Math.sqrt(2 * Math.PI) * SIGMA)) * Math.exp(-0.5 * Math.pow(dist / SIGMA, 2));
+        return (1.0 / (Math.sqrt(2 * Math.PI) * sigma)) * Math.exp(-0.5 * Math.pow(dist / sigma, 2));
     }
 
     private double transitionProbability(double linearDist, double routeDist) {
         double diff = Math.abs(linearDist - routeDist);
-        return (1.0 / BETA) * Math.exp(-diff / BETA);
+        return (1.0 / beta) * Math.exp(-diff / beta);
     }
 
     private double distanceMeters(Point p1, Point p2) {
@@ -203,23 +213,21 @@ public class HMMMapMatcher implements MapMatcher {
         List<Candidate> findCandidates(Point p, double radiusMeters);
     }
 
-    private static class DefaultSpatialIndex implements SpatialIndex {
-        private final List<RoadSegment> segments;
-        public DefaultSpatialIndex(List<RoadSegment> segments) { this.segments = segments; }
+    private record DefaultSpatialIndex(List<RoadSegment> segments) implements SpatialIndex {
 
         @Override
-        public List<Candidate> findCandidates(Point p, double radiusMeters) {
-            List<Candidate> results = new ArrayList<>();
-            double radiusDegrees = radiusMeters / METERS_PER_DEGREE;
-            for (RoadSegment seg : segments) {
-                Point projected = seg.project(p);
-                if (p.distanceTo(projected) <= radiusDegrees) {
-                    results.add(new Candidate(projected, seg));
+            public List<Candidate> findCandidates(Point p, double radiusMeters) {
+                List<Candidate> results = new ArrayList<>();
+                double radiusDegrees = radiusMeters / METERS_PER_DEGREE;
+                for (RoadSegment seg : segments) {
+                    Point projected = seg.project(p);
+                    if (p.distanceTo(projected) <= radiusDegrees) {
+                        results.add(new Candidate(projected, seg));
+                    }
                 }
+                return results;
             }
-            return results;
         }
-    }
 
     /**
      * LOCAL GRAPH ROUTING SERVICE

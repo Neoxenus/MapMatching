@@ -1,19 +1,32 @@
 package com.example.mapmatchingproject.matchers.impl;
 
 import com.example.mapmatchingproject.entities.Point;
+import com.example.mapmatchingproject.entities.RoadSegment;
 import com.example.mapmatchingproject.matchers.MapMatcher;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+
+@Slf4j
 @RequiredArgsConstructor
+@Component
 public class OSRMMapMatcher implements MapMatcher {
 
-    private static final String OSRM_API_URL = "http://router.project-osrm.org/match/v1/driving/";
+    @Value("${mapmatching.osrm.url}")
+    private String osrmApiUrl;
     private final RestTemplate restTemplate;
+
+    @Override
+    public void initContext(List<RoadSegment> segments) {
+        log.info("OSRMMapMatcher is ready (uses external graph).");
+    }
 
     @Override
     public List<Point> match(List<Point> rawTrace) {
@@ -24,7 +37,7 @@ public class OSRMMapMatcher implements MapMatcher {
             }
             coords.setLength(coords.length() - 1);
 
-            String urlStr = OSRM_API_URL + coords + "?geometries=geojson";
+            String urlStr = osrmApiUrl + coords + "?geometries=geojson";
             String responseStr = restTemplate.getForObject(urlStr, String.class);
             JSONObject response = new JSONObject(responseStr);
             JSONArray matchings = response.getJSONArray("matchings");

@@ -8,7 +8,7 @@ import org.springframework.web.client.RestTemplate;
 @SpringBootApplication
 public class MapMatchingProjectApplication {
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         SpringApplication.run(MapMatchingProjectApplication.class, args);
     }
 
@@ -16,6 +16,5 @@ public class MapMatchingProjectApplication {
     public RestTemplate restTemplate() {
         return new RestTemplate();
     }
-
 
 }

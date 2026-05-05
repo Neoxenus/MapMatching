@@ -1,15 +1,13 @@
 package com.example.mapmatchingproject.clients;
 
-import com.example.mapmatchingproject.entities.Point;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
 @Component
@@ -21,7 +19,8 @@ public class OverpassClient {
                     (%f,%f,%f,%f);
                 out geom;
                 """;
-    private static final String OVERPASS_API_URL = "https://overpass-api.de/api/interpreter";
+    @Value("${mapmatching.overpass.url}")
+    private String OVERPASS_API_URL;
 
     private final RestTemplate restTemplate;
 
@@ -43,22 +42,5 @@ public class OverpassClient {
 
         JSONObject response = new JSONObject(responseStr);
         return response.getJSONArray("elements");
-    }
-
-    public List<Point> getRoadPointsFromOverpass(double south, double west, double north, double east) {
-        List<Point> roadPoints = new ArrayList<>();
-        JSONArray elements = getJSONFromOverpass(south, west, north, east);
-
-        for (int i = 0; i < elements.length(); i++) {
-            JSONObject element = elements.getJSONObject(i);
-            if (element.has("geometry")) {
-                JSONArray geometry = element.getJSONArray("geometry");
-                for (int j = 0; j < geometry.length(); j++) {
-                    JSONObject pointJson = geometry.getJSONObject(j);
-                    roadPoints.add(new Point(pointJson.getDouble("lat"), pointJson.getDouble("lon")));
-                }
-            }
-        }
-        return roadPoints;
     }
 }
